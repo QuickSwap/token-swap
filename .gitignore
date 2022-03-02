@@ -1,0 +1,25 @@
+node_modules/
+coverage/
+cache/
+.env
+build/
+artifacts/
+migrations_test/
+keys
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+# System Files
+.DS_Store
+yarn-error.log

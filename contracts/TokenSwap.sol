@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: GPL-3.0
+
+pragma solidity 0.8.12;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+contract TokenSwap is Ownable {
+    using SafeERC20 for IERC20; 
+
+    // bytes4(keccak256(bytes("permit(address,address,uint256,uint256,uint8,bytes32,bytes32)")));
+    bytes4 constant _PERMIT_SIGNATURE = 0xd505accf;
+    
+    // Swap ratio from QUICK to QUICK-X multiplied by 1000. 1 QUICK = 1000 QUICK-X
+    uint256 public constant SWAP_RATIO = 1000000;
+
+    // QUICK token address
+    IERC20 public immutable quick;
+
+    // QUICK-X token address
+    IERC20 public immutable quickX;
+    
+    // Number of blocks after which the owner will be able to withdraw the remaining QUICKX tokens
+    uint256 public withdrawTimeout;
+
+
+    address public constant DEAD = address(0x000000000000000000000000000000000000dEaD);
+
+    /**
+     * @dev Emitted when someone swap QUICK for QUICK-X
+     */
+    event QuickToQuickX(uint256 quickAmount, uint256 quickxAmount, address indexed account);
+
+    /**
+     * @dev Emitted when the owner increases the timeout
+     */
+    event NewWithdrawTimeout(uint256 newWithdrawTimeout);
+
+    /**
+     * @dev Emitted when the owner withdraw tokens
+     */
+    event WithdrawTokens(address tokenAddress, uint256 amount);
+
+    /**
+     * @dev This contract will receive QUICK-X tokens, the users will be able to swap their QUICK tokens for QUICK-X tokens
+     *      as long as this contract holds enough amount. The swapped QUICK tokens will be burned(sent to DEAD address).
+     *      Once the withdrawTimeout is reached, the owner will be able to withdraw the remaining QUICK-X tokens.
+     * @param _quick QUICK token address
+     * @param _quickX QUICK-X token address
+     * @param duration Time in number of blocks after which the owner will be able to withdraw the QUICK-X tokens
+     */
+    constructor (
+        IERC20 _quick,
+        IERC20 _quickX,
+        uint256 duration
+    ){
+        quick = _quick;
+        quickX = _quickX;
+        withdrawTimeout = block.number + duration;
+    }
+
+    /**
+     * @notice Method that allows swap QUICK for QUICK-X tokens at the ratio of 1 QUICK --> 1000 QUICK-X
+     * Users can either use the permit functionality, or approve previously the tokens and send an empty _permitData
+     * @param quickAmount Amount of QUICK to swap
+     */
+    function quickToQuickX(uint256 quickAmount) public {
+        // receive and burn QUICK tokens
+        quick.safeTransferFrom(msg.sender, DEAD, quickAmount);
+
+        // transfer QUICK-X tokens
+        uint256 quickXAmount = (quickAmount * SWAP_RATIO) / 1000;
+        quickX.safeTransfer(msg.sender, quickXAmount);
+
+        emit QuickToQuickX(quickAmount, quickXAmount, msg.sender);
+    }
+
+    /**
+     * @notice Method that allows the owner to withdraw any token from this contract
+     * In order to withdraw QUICK-X tokens the owner must wait until the withdrawTimeout expires
+     * @param tokenAddress Token address
+     * @param amount Amount of tokens to withdraw
+     */
+    function withdrawTokens(address tokenAddress, uint256 amount) public onlyOwner {
+        if(tokenAddress == address(quickX)) {
+            require(
+                block.number > withdrawTimeout,
+                "TokenSwap::withdrawTokens: TIMEOUT_NOT_REACHED"
+            );
+        }
+        
+        IERC20(tokenAddress).safeTransfer(owner(), amount);
+
+        emit WithdrawTokens(tokenAddress, amount);
+    }
+
+    /**
+     * @notice Method that allows the owner to increase the withdraw timeout
+     * @param newWithdrawTimeout new withdraw timeout
+     */
+    function setWithdrawTimeout(uint256 newWithdrawTimeout) public onlyOwner {
+        require(
+            newWithdrawTimeout > withdrawTimeout,
+             "TokenSwap::setWithdrawTimeout: NEW_TIMEOUT_MUST_BE_HIGHER"
+        );
+        
+        withdrawTimeout = newWithdrawTimeout; 
+        
+        emit NewWithdrawTimeout(newWithdrawTimeout);
+    }
+}
