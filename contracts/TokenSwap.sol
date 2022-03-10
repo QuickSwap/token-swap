@@ -11,23 +11,23 @@ contract TokenSwap is Ownable {
     // bytes4(keccak256(bytes("permit(address,address,uint256,uint256,uint8,bytes32,bytes32)")));
     bytes4 constant _PERMIT_SIGNATURE = 0xd505accf;
     
-    // Swap ratio from QUICK to QUICK-X multiplied by 1000. 1 QUICK = 1000 QUICK-X
-    uint256 public constant SWAP_RATIO = 1000000;
+    // Swap ratio from QUICK to xQUICK multiplied by 1000.
+    uint256 public immutable swapRatio;
 
     // QUICK token address
     IERC20 public immutable quick;
 
-    // QUICK-X token address
+    // xQUICK token address
     IERC20 public immutable quickX;
     
-    // Number of blocks after which the owner will be able to withdraw the remaining QUICKX tokens
+    // Number of blocks after which the owner will be able to withdraw the remaining xQUICK tokens
     uint256 public withdrawTimeout;
 
 
     address public constant DEAD = address(0x000000000000000000000000000000000000dEaD);
 
     /**
-     * @dev Emitted when someone swap QUICK for QUICK-X
+     * @dev Emitted when someone swap QUICK for xQUICK
      */
     event QuickToQuickX(uint256 quickAmount, uint256 quickxAmount, address indexed account);
 
@@ -42,25 +42,31 @@ contract TokenSwap is Ownable {
     event WithdrawTokens(address tokenAddress, uint256 amount);
 
     /**
-     * @dev This contract will receive QUICK-X tokens, the users will be able to swap their QUICK tokens for QUICK-X tokens
+     * @dev This contract will receive xQUICK tokens, the users will be able to swap their QUICK tokens for xQUICK tokens
      *      as long as this contract holds enough amount. The swapped QUICK tokens will be burned(sent to DEAD address).
-     *      Once the withdrawTimeout is reached, the owner will be able to withdraw the remaining QUICK-X tokens.
+     *      Once the withdrawTimeout is reached, the owner will be able to withdraw the remaining xQUICK tokens.
      * @param _quick QUICK token address
-     * @param _quickX QUICK-X token address
-     * @param duration Time in number of blocks after which the owner will be able to withdraw the QUICK-X tokens
+     * @param _quickX xQUICK token address
+     * @param duration Time in number of blocks after which the owner will be able to withdraw the xQUICK tokens
+     * @param _swapRatio swap ratio for QUICK to xQUICK
      */
     constructor (
         IERC20 _quick,
         IERC20 _quickX,
-        uint256 duration
+        uint256 duration,
+        uint256 _swapRatio
     ){
+        require(_swapRatio == 100 || _swapRatio == 1000, "Invalid swap ratio");
+
         quick = _quick;
         quickX = _quickX;
         withdrawTimeout = block.number + duration;
+        swapRatio = _swapRatio * 1000;
+
     }
 
     /**
-     * @notice Method that allows swap QUICK for QUICK-X tokens at the ratio of 1 QUICK --> 1000 QUICK-X
+     * @notice Method that allows swap QUICK for xQUICK tokens at the ratio of 1 QUICK --> 1000 xQUICK
      * Users can either use the permit functionality, or approve previously the tokens and send an empty _permitData
      * @param quickAmount Amount of QUICK to swap
      */
@@ -68,8 +74,8 @@ contract TokenSwap is Ownable {
         // receive and burn QUICK tokens
         quick.safeTransferFrom(msg.sender, DEAD, quickAmount);
 
-        // transfer QUICK-X tokens
-        uint256 quickXAmount = (quickAmount * SWAP_RATIO) / 1000;
+        // transfer xQUICK tokens
+        uint256 quickXAmount = (quickAmount * swapRatio) / 1000;
         quickX.safeTransfer(msg.sender, quickXAmount);
 
         emit QuickToQuickX(quickAmount, quickXAmount, msg.sender);
@@ -77,7 +83,7 @@ contract TokenSwap is Ownable {
 
     /**
      * @notice Method that allows the owner to withdraw any token from this contract
-     * In order to withdraw QUICK-X tokens the owner must wait until the withdrawTimeout expires
+     * In order to withdraw xQUICK tokens the owner must wait until the withdrawTimeout expires
      * @param tokenAddress Token address
      * @param amount Amount of tokens to withdraw
      */

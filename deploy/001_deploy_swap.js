@@ -17,7 +17,7 @@ module.exports = async ({getNamedAccounts, deployments, getChainId}) => {
     const chainId = await getChainId();
     console.log(chainId)
     const config = getConfig(chainId);
-    const args = [config.QUICK, config.QUICKX, config.DURATION];
+    const args = [config.QUICK, config.QUICKX, config.DURATION, config.SWAP_RATIO];
 
     const result = await deploy('TokenSwap', {
       from: deployer,

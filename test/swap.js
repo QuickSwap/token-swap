@@ -15,6 +15,8 @@ describe("Token Swap", function () {
   let wallet;
   let quickSupply;
   let quickXSupply;
+  let duration = 10;
+  let swapRatio = 1000;
   const DEAD = "0x000000000000000000000000000000000000dEaD";
 
   before(async function () {
@@ -32,7 +34,7 @@ describe("Token Swap", function () {
 
     quick = await this.QUICK.deploy("QuickSwap", "QUICK", quickSupply)
     quickX = await this.QUICK.deploy("QuickSwap", "QUICK-X", quickXSupply)
-    tokenSwap = await this.TokenSwap.deploy(quick.address, quickX.address, 10)
+    tokenSwap = await this.TokenSwap.deploy(quick.address, quickX.address, duration, swapRatio)
     
     await quickX.transfer(tokenSwap.address, quickXSupply)
     
@@ -127,7 +129,7 @@ describe("Token Swap", function () {
   it("should allow owner to withdraw QUICK-X after withdraw timeout has reached", async function () {
     const tokenAmount = expandTo18Decimals(10000)
     
-    await mineBlocks(10);
+    await mineBlocks(duration);
 
     await expect(
       tokenSwap.withdrawTokens(quickX.address, tokenAmount)
