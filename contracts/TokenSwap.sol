@@ -56,6 +56,9 @@ contract TokenSwap is Ownable {
         uint256 duration,
         uint256 _swapRatio
     ){
+        require(_quick != address(0), "Invalid address");
+        require(_quickX != address(0), "Invalid address");
+
         require(_swapRatio == 100 || _swapRatio == 1000, "Invalid swap ratio");
 
         quick = _quick;
