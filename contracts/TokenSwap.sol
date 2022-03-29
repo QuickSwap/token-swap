@@ -7,10 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract TokenSwap is Ownable {
     using SafeERC20 for IERC20; 
-
-    // bytes4(keccak256(bytes("permit(address,address,uint256,uint256,uint8,bytes32,bytes32)")));
-    bytes4 constant _PERMIT_SIGNATURE = 0xd505accf;
-    
+ 
     // Swap ratio from QUICK to xQUICK multiplied by 1000.
     uint256 public immutable swapRatio;
 
