@@ -56,12 +56,11 @@ contract TokenSwap is Ownable {
         require(_quick != address(0), "Invalid address");
         require(_quickX != address(0), "Invalid address");
 
-        require(_swapRatio == 100 || _swapRatio == 1000, "Invalid swap ratio");
+        require(_swapRatio == 1000, "Invalid swap ratio");
 
         quick = _quick;
         quickX = _quickX;
         withdrawTimeout = block.number + duration;
-        swapRatio = _swapRatio * 1000;
 
     }
 
@@ -75,7 +74,7 @@ contract TokenSwap is Ownable {
         quick.safeTransferFrom(msg.sender, DEAD, quickAmount);
 
         // transfer xQUICK tokens
-        uint256 quickXAmount = (quickAmount * swapRatio) / 1000;
+        uint256 quickXAmount = quickAmount * swapRatio;
         quickX.safeTransfer(msg.sender, quickXAmount);
 
         emit QuickToQuickX(quickAmount, quickXAmount, msg.sender);
