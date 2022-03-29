@@ -66,7 +66,6 @@ contract TokenSwap is Ownable {
 
     /**
      * @notice Method that allows swap QUICK for xQUICK tokens at the ratio of 1 QUICK --> 1000 xQUICK
-     * Users can either use the permit functionality, or approve previously the tokens and send an empty _permitData
      * @param quickAmount Amount of QUICK to swap
      */
     function quickToQuickX(uint256 quickAmount) public {
