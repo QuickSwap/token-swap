@@ -9,7 +9,7 @@ contract TokenSwap is Ownable {
     using SafeERC20 for IERC20; 
  
     // Swap ratio from QUICK to xQUICK multiplied by 1000.
-    uint256 public immutable swapRatio;
+    uint256 public constant SWAP_RATIO = 1000;
 
     // QUICK token address
     IERC20 public immutable quick;
@@ -45,18 +45,14 @@ contract TokenSwap is Ownable {
      * @param _quick QUICK token address
      * @param _quickX xQUICK token address
      * @param duration Time in number of blocks after which the owner will be able to withdraw the xQUICK tokens
-     * @param _swapRatio swap ratio for QUICK to xQUICK
      */
     constructor (
         IERC20 _quick,
         IERC20 _quickX,
-        uint256 duration,
-        uint256 _swapRatio
+        uint256 duration
     ){
-        require(_quick != address(0), "Invalid address");
-        require(_quickX != address(0), "Invalid address");
-
-        require(_swapRatio == 1000, "Invalid swap ratio");
+        require(address(_quick) != address(0), "Invalid address");
+        require(address(_quickX) != address(0), "Invalid address");
 
         quick = _quick;
         quickX = _quickX;
@@ -73,7 +69,7 @@ contract TokenSwap is Ownable {
         quick.safeTransferFrom(msg.sender, DEAD, quickAmount);
 
         // transfer xQUICK tokens
-        uint256 quickXAmount = quickAmount * swapRatio;
+        uint256 quickXAmount = quickAmount * SWAP_RATIO;
         quickX.safeTransfer(msg.sender, quickXAmount);
 
         emit QuickToQuickX(quickAmount, quickXAmount, msg.sender);

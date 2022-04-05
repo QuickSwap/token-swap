@@ -16,7 +16,6 @@ describe("Token Swap", function () {
   let quickSupply;
   let quickXSupply;
   let duration = 10;
-  let swapRatio = 1000;
   const DEAD = "0x000000000000000000000000000000000000dEaD";
 
   before(async function () {
@@ -34,7 +33,7 @@ describe("Token Swap", function () {
 
     quick = await this.QUICK.deploy("QuickSwap", "QUICK", quickSupply)
     quickX = await this.QUICK.deploy("QuickSwap", "QUICK-X", quickXSupply)
-    tokenSwap = await this.TokenSwap.deploy(quick.address, quickX.address, duration, swapRatio)
+    tokenSwap = await this.TokenSwap.deploy(quick.address, quickX.address, duration)
     
     await quickX.transfer(tokenSwap.address, quickXSupply)
     
