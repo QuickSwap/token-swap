@@ -32,7 +32,36 @@ function resolveDuration(config, env) {
   if (!/^[1-9][0-9]*$/.test(String(raw))) {
     throw new Error(`Withdraw timeout must be a positive integer number of blocks, got "${raw}"`);
   }
+  if (BigInt(raw) > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`Withdraw timeout must not exceed the safe integer range, got "${raw}"`);
+  }
   return Number(raw);
+}
+
+function expectedWithdrawTimeout(deploymentBlock, duration) {
+  if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
+    throw new Error(`Cannot read the TokenSwap deployment block, got ${deploymentBlock}`);
+  }
+  return (BigInt(deploymentBlock) + BigInt(duration)).toString();
+}
+
+function assertDeployedState(actual, expected) {
+  if (!sameAddress(actual.quick, expected.quick)) {
+    throw new Error(`Deployed TokenSwap quick() is ${actual.quick}, expected ${expected.quick}`);
+  }
+  if (!sameAddress(actual.quickX, expected.quickX)) {
+    throw new Error(`Deployed TokenSwap quickX() is ${actual.quickX}, expected ${expected.quickX}`);
+  }
+  if (String(actual.withdrawTimeout) !== String(expected.withdrawTimeout)) {
+    throw new Error(
+      `Deployed TokenSwap withdrawTimeout() is ${actual.withdrawTimeout}, expected ${expected.withdrawTimeout}`
+    );
+  }
+  if (!expected.owners.some((owner) => sameAddress(actual.owner, owner))) {
+    throw new Error(
+      `Deployed TokenSwap owner() is ${actual.owner}, expected one of ${expected.owners.join(", ")}`
+    );
+  }
 }
 
 async function assertDeployTargets({ chainId, config, reader }) {
@@ -130,6 +159,25 @@ async function deployTokenSwap(hre) {
     skipIfAlreadyDeployed: true,
   });
 
+  const tokenSwap = await ethers.getContractAt("TokenSwap", result.address, await ethers.getSigner(deployer));
+  const deploymentBlock = result.receipt
+    ? result.receipt.blockNumber
+    : (await ethers.provider.getTransactionReceipt(result.transactionHash) || {}).blockNumber;
+  assertDeployedState(
+    {
+      quick: await tokenSwap.quick(),
+      quickX: await tokenSwap.quickX(),
+      withdrawTimeout: (await tokenSwap.withdrawTimeout()).toString(),
+      owner: await tokenSwap.owner(),
+    },
+    {
+      quick: config.QUICK,
+      quickX: config.QUICKX,
+      withdrawTimeout: expectedWithdrawTimeout(deploymentBlock, duration),
+      owners: config.OWNER ? [deployer, config.OWNER] : [deployer],
+    }
+  );
+
   if (result.newlyDeployed && !local) {
     await wait(20000);
     try {
@@ -143,7 +191,6 @@ async function deployTokenSwap(hre) {
     return;
   }
 
-  const tokenSwap = await ethers.getContractAt("TokenSwap", result.address, await ethers.getSigner(deployer));
   const currentOwner = await tokenSwap.owner();
   if (!sameAddress(currentOwner, config.OWNER)) {
     assertOwner(currentOwner, deployer);
@@ -162,4 +209,6 @@ module.exports.checks = {
   resolveDuration,
   assertDeployTargets,
   assertOwner,
+  expectedWithdrawTimeout,
+  assertDeployedState,
 };

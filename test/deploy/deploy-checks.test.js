@@ -1,10 +1,10 @@
-// Runs under `npx hardhat test` (mocha globals) and standalone with `node --test test/deploy/`.
+// Runs under `npx hardhat test` (mocha globals) and standalone with `node --test 'test/deploy/*.test.js'`.
 const assert = require("assert");
 const { describe, it } = typeof global.describe === "function" ? global : require("node:test");
 
 const { getConfig, isLocalChain } = require("../../config");
 const { checks } = require("../../deploy/001_deploy_swap");
-const { EXPECTED_TARGETS, resolveDuration, assertDeployTargets, assertOwner } = checks;
+const { EXPECTED_TARGETS, resolveDuration, assertDeployTargets, assertOwner, expectedWithdrawTimeout, assertDeployedState } = checks;
 
 const POLYGON = "137";
 const expected = EXPECTED_TARGETS[POLYGON];
@@ -58,6 +58,15 @@ describe("resolveDuration", function () {
 
   it("requires a duration when none is configured", function () {
     assert.throws(() => resolveDuration({}, {}), /TOKEN_SWAP_DURATION_BLOCKS/);
+  });
+
+  it("rejects values above the safe integer range", function () {
+    const tooLarge = String(BigInt(Number.MAX_SAFE_INTEGER) + 1n);
+    assert.throws(() => resolveDuration({}, { TOKEN_SWAP_DURATION_BLOCKS: tooLarge }), /safe integer/);
+    assert.strictEqual(
+      resolveDuration({}, { TOKEN_SWAP_DURATION_BLOCKS: String(Number.MAX_SAFE_INTEGER) }),
+      Number.MAX_SAFE_INTEGER
+    );
   });
 
   it("rejects non positive or non integer values", function () {
@@ -141,6 +150,68 @@ describe("assertOwner", function () {
     assert.throws(
       () => assertOwner("0x0000000000000000000000000000000000000002", expected.OWNER),
       /TokenSwap owner is 0x0000000000000000000000000000000000000002/
+    );
+  });
+});
+
+describe("expectedWithdrawTimeout", function () {
+  it("adds the duration to the deployment block", function () {
+    assert.strictEqual(expectedWithdrawTimeout(95000000, 1036800), "96036800");
+  });
+
+  it("requires a deployment block", function () {
+    for (const block of [undefined, null, -1, 1.5]) {
+      assert.throws(() => expectedWithdrawTimeout(block, 10), /deployment block/);
+    }
+  });
+});
+
+describe("assertDeployedState", function () {
+  const deployer = "0x00000000000000000000000000000000000000d1";
+  const want = {
+    quick: expected.QUICK.address,
+    quickX: expected.QUICKX.address,
+    withdrawTimeout: "96036800",
+    owners: [deployer, expected.OWNER],
+  };
+  const state = (overrides = {}) => ({
+    quick: expected.QUICK.address.toLowerCase(),
+    quickX: expected.QUICKX.address.toLowerCase(),
+    withdrawTimeout: "96036800",
+    owner: deployer,
+    ...overrides,
+  });
+
+  it("passes when the deployed contract matches", function () {
+    assertDeployedState(state(), want);
+    assertDeployedState(state({ owner: expected.OWNER }), want);
+  });
+
+  it("refuses a different QUICK token", function () {
+    assert.throws(
+      () => assertDeployedState(state({ quick: "0xD5A3EA6C74df25F565f45b894C470424051c0c94" }), want),
+      /Deployed TokenSwap quick\(\) is 0xD5A3EA6C74df25F565f45b894C470424051c0c94/
+    );
+  });
+
+  it("refuses a different QUICKX token", function () {
+    assert.throws(
+      () => assertDeployedState(state({ quickX: "0x0000000000000000000000000000000000000001" }), want),
+      /Deployed TokenSwap quickX\(\) is/
+    );
+  });
+
+  it("refuses a different withdraw timeout", function () {
+    assert.throws(
+      () => assertDeployedState(state({ withdrawTimeout: "96036801" }), want),
+      /Deployed TokenSwap withdrawTimeout\(\) is 96036801, expected 96036800/
+    );
+  });
+
+  it("refuses an owner outside the allowed set", function () {
+    assert.throws(
+      () => assertDeployedState(state({ owner: "0x0000000000000000000000000000000000000002" }), want),
+      /Deployed TokenSwap owner\(\) is 0x0000000000000000000000000000000000000002/
     );
   });
 });
