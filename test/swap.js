@@ -21,7 +21,7 @@ describe("Token Swap", function () {
   before(async function () {
     this.QUICK = await ethers.getContractFactory("TestToken")
     this.QUICKX = await ethers.getContractFactory("TestToken")
-    this.TokenSwap = await ethers.getContractFactory("TokenSwap")
+    this.TokenSwap = await ethers.getContractFactory("contracts/TokenSwap.sol:TokenSwap")
 
     const signers = await ethers.getSigners()
     wallet = signers[0]

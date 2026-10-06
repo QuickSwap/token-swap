@@ -68,7 +68,7 @@ function fakeHre({ owner, ownerAfterTransfer = SAFE }) {
       Contract: FakeContract,
       getSigner: async (address) => ({ address }),
       getContractAt: async (name, address) => {
-        assert.strictEqual(name, "TokenSwap");
+        assert.strictEqual(name, "contracts/TokenSwap.sol:TokenSwap");
         assert.strictEqual(address, TOKEN_SWAP);
         return tokenSwap;
       },

@@ -145,7 +145,7 @@ async function deployTokenSwap(hre) {
   const duration = resolveDuration(config, process.env);
   await assertDeployTargets({ chainId, config, reader: chainReader(ethers) });
 
-  const artifact = await deployments.getArtifact("TokenSwap");
+  const artifact = await deployments.getArtifact("contracts/TokenSwap.sol:TokenSwap");
   const args = [config.QUICK, config.QUICKX, duration];
   const result = await deploy("TokenSwap", {
     from: deployer,
@@ -159,7 +159,7 @@ async function deployTokenSwap(hre) {
     skipIfAlreadyDeployed: true,
   });
 
-  const tokenSwap = await ethers.getContractAt("TokenSwap", result.address, await ethers.getSigner(deployer));
+  const tokenSwap = await ethers.getContractAt("contracts/TokenSwap.sol:TokenSwap", result.address, await ethers.getSigner(deployer));
   const deploymentBlock = result.receipt
     ? result.receipt.blockNumber
     : (await ethers.provider.getTransactionReceipt(result.transactionHash) || {}).blockNumber;
