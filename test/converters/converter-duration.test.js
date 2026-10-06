@@ -6,7 +6,7 @@ const { describe, it } = typeof global.describe === "function" ? global : requir
 const { run } = require("../../scripts/converter-duration");
 const { parseCutover, deriveWithdrawDuration } = require("../../scripts/lib/withdraw-timeout");
 
-const ENDS = { 750: "2026-12-05T14:00:00Z", 500: "2027-01-05T14:00:00Z", 250: "2027-02-05T14:00:00Z" };
+const ENDS = { 750: "2026-12-05T00:00:00Z", 500: "2027-01-05T00:00:00Z", 250: "2027-02-05T00:00:00Z" };
 const BASE = {
   "--block-number": "95000000",
   "--block-timestamp": "1791300000",
