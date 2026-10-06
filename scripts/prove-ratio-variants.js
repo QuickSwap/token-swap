@@ -20,6 +20,10 @@ const VARIANTS = [750, 500, 250].map((ratio) => ({ source: `contracts/ratio-${ra
 const ONCHAIN_ADDRESS = "0x333068d06563a8dfdbf330a0e04a9d128e98bf5a";
 const EXPECTED_SOLC = "0.8.12+commit.f00d7308";
 const OZ_PREFIX = "@openzeppelin/contracts/";
+// SWAP_RATIO is pushed at two runtime sites and never in the init code. The runtime part of the
+// creation code is byte-identical to the deployed runtime (enforced by splitCreationCode), so the
+// runtime count also covers the runtime embedded in the creation code.
+const EXPECTED_RATIO_SITES = { runtime: 2, init: 0 };
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -102,6 +106,8 @@ function proveVariant(audited, variant, ratio) {
     variant: variant.sections,
     auditedRatio: AUDITED.ratio,
     variantRatio: ratio,
+    immutableReferences: { audited: audited.immutableReferences, variant: variant.immutableReferences },
+    expectedRatioSites: EXPECTED_RATIO_SITES,
   });
   const failures = [...buildFailures(audited, variant), ...report.failures];
   return { source: variant.source, ratio, ...report, ok: failures.length === 0, failures };
@@ -137,7 +143,12 @@ function rpcCall(url, method, params) {
 }
 
 async function proveOnchain(audited, rpcUrl) {
-  const code = await rpcCall(rpcUrl, "eth_getCode", [ONCHAIN_ADDRESS, "latest"]);
+  let code;
+  try {
+    code = await rpcCall(rpcUrl, "eth_getCode", [ONCHAIN_ADDRESS, "latest"]);
+  } catch (error) {
+    return { address: ONCHAIN_ADDRESS, ok: false, message: error.message };
+  }
   if (typeof code !== "string" || code.length <= 2) {
     return { address: ONCHAIN_ADDRESS, ok: false, message: "No code at the address" };
   }
@@ -172,7 +183,7 @@ function printReport(result) {
     console.log(`${name}: ${audited}/${variant} instructions, ${section.differences.length} differing`);
     for (const d of section.differences) {
       const offsets = `0x${d.auditedOffset.toString(16).padStart(4, "0")}/0x${d.variantOffset.toString(16).padStart(4, "0")}`;
-      console.log(`  [${d.index}] @${offsets} ${d.audited} -> ${d.variant} (${d.kind})`);
+      console.log(`  [${d.index}] @${offsets} ${d.audited} -> ${d.variant} (${d.kind}: ${d.detail})`);
     }
   }
   const counts = Object.entries(result.counts).map(([kind, count]) => `${kind} ${count}`).join(", ");
@@ -214,4 +225,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { loadBuild, proveVariant, settingsFailures, VARIANTS, AUDITED };
+module.exports = { loadBuild, proveVariant, settingsFailures, VARIANTS, AUDITED, EXPECTED_RATIO_SITES };

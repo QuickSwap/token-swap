@@ -23,10 +23,10 @@ const METADATA = "a16400" + "0003";
 const section = (runtime, initCode = "") => ({ initCode, runtime, metadata: "" });
 
 // Init code: CODECOPY the full runtime from the end of the init code, write one value at a runtime
-// position (the JUMPDEST byte), and read the creation size for constructor arguments.
-function initCodeFor(runtime) {
+// position (the JUMPDEST byte by default), and read the creation size for constructor arguments.
+function initCodeFor(runtime, position) {
   const runtimeFullLength = runtime.length / 2 + METADATA.length / 2;
-  const jumpdest = disassemble(runtime).find((ins) => ins.name === "JUMPDEST").offset;
+  const jumpdest = position !== undefined ? position : disassemble(runtime).find((ins) => ins.name === "JUMPDEST").offset;
   const build = (initLength) =>
     "61" + hex2(initLength + runtimeFullLength) + // creation length
     "61" + hex2(runtimeFullLength) + // runtime length
@@ -120,7 +120,7 @@ describe("compareVariant", function () {
     const report = compare(section(AUDITED_RUNTIME), section(variant), 750);
     assert.strictEqual(report.ok, true, report.failures.join("\n"));
     assert.deepStrictEqual(report.sections.runtime.differences, [
-      { index: 0, auditedOffset: 0, variantOffset: 0, audited: "PUSH2 0x03e8", variant: "PUSH2 0x02ee", kind: "ratio" },
+      { index: 0, auditedOffset: 0, variantOffset: 0, audited: "PUSH2 0x03e8", variant: "PUSH2 0x02ee", kind: "ratio", detail: "SWAP_RATIO" },
     ]);
   });
 
@@ -128,24 +128,37 @@ describe("compareVariant", function () {
     const report = compare(section(AUDITED_RUNTIME), section(VARIANT_250_RUNTIME));
     assert.strictEqual(report.ok, true, report.failures.join("\n"));
     assert.deepStrictEqual(report.sections.runtime.differences, [
-      { index: 0, auditedOffset: 0, variantOffset: 0, audited: "PUSH2 0x03e8", variant: "PUSH1 0xfa", kind: "ratio" },
-      { index: 1, auditedOffset: 3, variantOffset: 2, audited: "PUSH2 0x0008", variant: "PUSH2 0x0007", kind: "code-offset" },
+      { index: 0, auditedOffset: 0, variantOffset: 0, audited: "PUSH2 0x03e8", variant: "PUSH1 0xfa", kind: "ratio", detail: "SWAP_RATIO" },
+      { index: 1, auditedOffset: 3, variantOffset: 2, audited: "PUSH2 0x0008", variant: "PUSH2 0x0007", kind: "code-offset", detail: "runtime JUMPDEST" },
     ]);
     assert.deepStrictEqual(report.counts, { ratio: 1, "code-offset": 1, "code-length": 0 });
   });
 
-  it("accepts init code whose runtime length, creation length and runtime positions move", function () {
+  // The init code writes one immutable at runtime position 0x08 (audited) / 0x07 (variant).
+  const immutables = (auditedStart, variantStart) => ({
+    audited: { 11: [{ start: auditedStart, length: 1 }] },
+    variant: { 42: [{ start: variantStart, length: 1 }] },
+  });
+
+  it("accepts init code whose runtime length, creation length and immutable positions move", function () {
     const audited = { initCode: initCodeFor(AUDITED_RUNTIME), runtime: AUDITED_RUNTIME, metadata: METADATA };
     const variant = { initCode: initCodeFor(VARIANT_250_RUNTIME), runtime: VARIANT_250_RUNTIME, metadata: METADATA };
-    const report = compare(audited, variant);
+    const report = compareVariant({
+      audited,
+      variant,
+      auditedRatio: 1000,
+      variantRatio: 250,
+      immutableReferences: immutables(8, 7),
+      expectedRatioSites: { runtime: 1, init: 0 },
+    });
     assert.strictEqual(report.ok, true, report.failures.join("\n"));
     assert.deepStrictEqual(
-      report.sections.init.differences.map((d) => [d.index, d.audited, d.variant, d.kind]),
+      report.sections.init.differences.map((d) => [d.index, d.audited, d.variant, d.kind, d.detail]),
       [
-        [0, "PUSH2 0x0026", "PUSH2 0x0025", "code-length"],
-        [1, "PUSH2 0x000f", "PUSH2 0x000e", "code-length"],
-        [5, "PUSH2 0x0008", "PUSH2 0x0007", "code-offset"],
-        [7, "PUSH2 0x000f", "PUSH2 0x000e", "code-length"],
+        [0, "PUSH2 0x0026", "PUSH2 0x0025", "code-length", "creation length"],
+        [1, "PUSH2 0x000f", "PUSH2 0x000e", "code-length", "full runtime length"],
+        [5, "PUSH2 0x0008", "PUSH2 0x0007", "code-offset", "immutable 0[0] start"],
+        [7, "PUSH2 0x000f", "PUSH2 0x000e", "code-length", "full runtime length"],
       ]
     );
     assert.deepStrictEqual(report.counts, { ratio: 1, "code-offset": 2, "code-length": 3 });
@@ -192,6 +205,49 @@ describe("compareVariant", function () {
     assert.match(report.failures.join("\n"), /runtime\[1\] .*jump destination 0x0008 moved to 0x0007/);
   });
 
+  it("fails on a non-jump-target push that moves with the code", function () {
+    // PUSH2 ratio; PUSH2 <jumpdest>; JUMP; PUSH1 <position after the JUMPDEST>; POP; STOP; JUMPDEST; STOP
+    const audited = "6103e8" + "61000b" + "56" + "600c" + "50" + "00" + "5b" + "00";
+    const variant = "60fa" + "61000a" + "56" + "600b" + "50" + "00" + "5b" + "00";
+    const report = compare(section(audited), section(variant));
+    assert.strictEqual(report.ok, false);
+    assert.match(report.failures.join("\n"), /runtime\[3\] .*PUSH1 0x0c -> PUSH1 0x0b is not a ratio, code offset or code length/);
+  });
+
+  it("fails on an init value that moves with a runtime position that is not an immutable", function () {
+    const audited = { initCode: initCodeFor(AUDITED_RUNTIME), runtime: AUDITED_RUNTIME, metadata: METADATA };
+    const variant = { initCode: initCodeFor(VARIANT_250_RUNTIME), runtime: VARIANT_250_RUNTIME, metadata: METADATA };
+    const report = compareVariant({ audited, variant, auditedRatio: 1000, variantRatio: 250, immutableReferences: immutables(9, 8) });
+    assert.strictEqual(report.ok, false);
+    assert.match(report.failures.join("\n"), /init\[5\] .*PUSH2 0x0008 -> PUSH2 0x0007 is not a ratio, code offset or code length/);
+  });
+
+  it("fails on immutable references that do not follow the code alignment", function () {
+    const audited = { initCode: initCodeFor(AUDITED_RUNTIME), runtime: AUDITED_RUNTIME, metadata: METADATA };
+    const variant = { initCode: initCodeFor(VARIANT_250_RUNTIME, 6), runtime: VARIANT_250_RUNTIME, metadata: METADATA };
+    const report = compareVariant({ audited, variant, auditedRatio: 1000, variantRatio: 250, immutableReferences: immutables(8, 6) });
+    assert.strictEqual(report.ok, false);
+    assert.match(report.failures.join("\n"), /immutable 0\[0\] start 0x0008 maps to 0x0007, variant start is 0x0006/);
+  });
+
+  it("fails on a ratio push left at the audited value", function () {
+    const report = compare(section("6103e8" + "6103e8" + "00"), section("6100fa" + "6103e8" + "00"));
+    assert.strictEqual(report.ok, false);
+    assert.match(report.failures.join("\n"), /runtime\[1\] .*PUSH2 0x03e8 still pushes the audited ratio/);
+  });
+
+  it("fails when the number of ratio sites differs from the expected count", function () {
+    const report = compareVariant({
+      audited: section(AUDITED_RUNTIME),
+      variant: section(VARIANT_250_RUNTIME),
+      auditedRatio: 1000,
+      variantRatio: 250,
+      expectedRatioSites: { runtime: 2 },
+    });
+    assert.strictEqual(report.ok, false);
+    assert.match(report.failures.join("\n"), /runtime: 1 ratio sites, expected 2/);
+  });
+
   it("fails on a differing instruction count", function () {
     const report = compare(section(AUDITED_RUNTIME), section(VARIANT_250_RUNTIME + "00"));
     assert.strictEqual(report.ok, false);
@@ -232,5 +288,14 @@ describe("compareRuntimeWithOnchain", function () {
     });
     assert.strictEqual(result.ok, false);
     assert.match(result.message, /length differs \(34 vs 35\)/);
+  });
+
+  it("reports a length difference before applying immutable ranges", function () {
+    const result = compareRuntimeWithOnchain({
+      compiled: compiledRuntime + METADATA,
+      onchain: "7f" + "ab".repeat(20) + METADATA,
+      immutableReferences: references,
+    });
+    assert.deepStrictEqual(result, { ok: false, message: "Runtime length differs (34 vs 21)" });
   });
 });

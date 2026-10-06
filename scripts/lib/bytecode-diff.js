@@ -124,38 +124,100 @@ function buildLayout(code, metadata = "") {
 }
 
 const pushValue = (instruction) => (instruction.data === "" ? 0n : BigInt(`0x${instruction.data}`));
+const hex4 = (n) => `0x${Number(n).toString(16).padStart(4, "0")}`;
 
-// Each mapper returns the expected variant value for an audited value, or null when not applicable.
-function sectionMappers(name, layouts) {
+// Pairs the immutable reference starts of both builds by sorted AST id position and range order.
+// Returns { pairs: Map<auditedStart, { start, detail }>, failures }.
+function pairImmutables(immutableReferences, layouts) {
+  const pairs = new Map();
+  const failures = [];
+  if (!immutableReferences) return { pairs, failures };
+  const ordered = (refs) =>
+    Object.keys(refs || {})
+      .sort((a, b) => Number(a) - Number(b))
+      .map((id) => refs[id]);
+  const audited = ordered(immutableReferences.audited);
+  const variant = ordered(immutableReferences.variant);
+  if (audited.length !== variant.length) {
+    failures.push(`immutables: ${audited.length} audited vs ${variant.length} variant references`);
+    return { pairs, failures };
+  }
+  const a = layouts.audited.runtime;
+  const v = layouts.variant.runtime;
+  audited.forEach((ranges, position) => {
+    if (ranges.length !== variant[position].length) {
+      failures.push(`immutables: reference ${position} has ${ranges.length} audited vs ${variant[position].length} variant ranges`);
+      return;
+    }
+    ranges.forEach((range, order) => {
+      const other = variant[position][order];
+      const detail = `immutable ${position}[${order}] start`;
+      const mapped = mapPosition(a.instructions, v.instructions, a.length, v.length, range.start);
+      if (range.length !== other.length || mapped !== other.start) {
+        failures.push(`${detail} ${hex4(range.start)} maps to ${mapped === null ? "nowhere" : hex4(mapped)}, variant start is ${hex4(other.start)}`);
+        return;
+      }
+      pairs.set(range.start, { start: other.start, detail });
+    });
+  });
+  return { pairs, failures };
+}
+
+// Each rule returns { value, detail } with the expected variant value for an audited value, or null.
+// Code offsets are JUMPDEST positions of the same section or, in the init code, immutable starts
+// of the runtime. Code lengths are the runtime start, both runtime lengths and the creation length.
+function sectionRules(name, layouts, immutables) {
   const { audited, variant } = layouts;
-  const map = (a, v, value) =>
-    value > BigInt(Number.MAX_SAFE_INTEGER) ? null : mapPosition(a.instructions, v.instructions, a.length, v.length, Number(value));
-  const offsets = [(value) => map(audited[name], variant[name], value)];
+  const jumpdest = (value) => {
+    if (value > BigInt(audited[name].length)) return null;
+    const position = Number(value);
+    const a = audited[name];
+    const v = variant[name];
+    const target = a.instructions.find((ins) => ins.offset === position);
+    if (!target || target.opcode !== JUMPDEST) return null;
+    const mapped = mapPosition(a.instructions, v.instructions, a.length, v.length, position);
+    const moved = v.instructions[target.index];
+    if (mapped === null || !moved || moved.opcode !== JUMPDEST || moved.offset !== mapped) return null;
+    return { value: mapped, detail: `${name} JUMPDEST` };
+  };
+  const offsets = [jumpdest];
   const lengths = [];
   if (name === "init") {
-    const runtimeStart = (layout) => layout.init.length;
-    offsets.push((value) => map(audited.runtime, variant.runtime, value));
-    offsets.push((value) => (value === BigInt(runtimeStart(audited)) ? runtimeStart(variant) : null));
+    offsets.push((value) => {
+      const pair = value <= BigInt(Number.MAX_SAFE_INTEGER) ? immutables.get(Number(value)) : undefined;
+      return pair ? { value: pair.start, detail: pair.detail } : null;
+    });
     const full = (layout) => layout.runtime.length + layout.runtime.metadataLength;
-    lengths.push((value) => (value === BigInt(full(audited)) ? full(variant) : null));
-    lengths.push((value) => (value === BigInt(audited.runtime.length) ? variant.runtime.length : null));
-    lengths.push((value) => (value === BigInt(audited.init.length + full(audited)) ? variant.init.length + full(variant) : null));
+    const quantities = [
+      ["runtime start", (layout) => layout.init.length],
+      ["full runtime length", full],
+      ["stripped runtime length", (layout) => layout.runtime.length],
+      ["creation length", (layout) => layout.init.length + full(layout)],
+    ];
+    for (const [detail, quantity] of quantities) {
+      lengths.push((value) => (value === BigInt(quantity(audited)) ? { value: quantity(variant), detail } : null));
+    }
   }
   return { offsets, lengths };
 }
 
-function classify(auditedValue, variantValue, mappers, ratios) {
-  if (auditedValue === ratios.audited && variantValue === ratios.variant) return "ratio";
-  const matches = (list) => list.some((mapper) => {
-    const expected = mapper(auditedValue);
-    return expected !== null && BigInt(expected) === variantValue;
-  });
-  if (matches(mappers.offsets)) return "code-offset";
-  if (matches(mappers.lengths)) return "code-length";
+function classify(auditedValue, variantValue, rules, ratios) {
+  if (auditedValue === ratios.audited && variantValue === ratios.variant) return { kind: "ratio", detail: "SWAP_RATIO" };
+  const match = (list) => {
+    for (const rule of list) {
+      const expected = rule(auditedValue);
+      if (expected !== null && BigInt(expected.value) === variantValue) return expected.detail;
+    }
+    return null;
+  };
+  const offset = match(rules.offsets);
+  if (offset) return { kind: "code-offset", detail: offset };
+  const length = match(rules.lengths);
+  if (length) return { kind: "code-length", detail: length };
   return null;
 }
 
-function compareSection(name, layouts, ratios) {
+function compareSection(name, layouts, ratios, immutables) {
   const audited = layouts.audited[name].instructions;
   const variant = layouts.variant[name].instructions;
   const differences = [];
@@ -165,15 +227,16 @@ function compareSection(name, layouts, ratios) {
     return { instructionCount: { audited: audited.length, variant: variant.length }, differences, failures };
   }
 
-  const mappers = sectionMappers(name, layouts);
+  const rules = sectionRules(name, layouts, immutables);
   const auditedLayout = layouts.audited[name];
   const variantLayout = layouts.variant[name];
   const jumpdests = new Set(audited.filter((ins) => ins.opcode === JUMPDEST).map((ins) => ins.offset));
+  const ratioChanges = ratios.audited !== ratios.variant;
 
   for (let index = 0; index < audited.length; index += 1) {
     const a = audited[index];
     const v = variant[index];
-    const where = `${name}[${index}] @0x${a.offset.toString(16).padStart(4, "0")}/0x${v.offset.toString(16).padStart(4, "0")}`;
+    const where = `${name}[${index}] @${hex4(a.offset)}/${hex4(v.offset)}`;
     const bothPush = isPush(a) && isPush(v) && a.opcode !== 0x5f && v.opcode !== 0x5f;
 
     if (!bothPush) {
@@ -189,24 +252,33 @@ function compareSection(name, layouts, ratios) {
 
     const auditedValue = pushValue(a);
     const variantValue = pushValue(v);
+    if (ratioChanges && auditedValue === ratios.audited && variantValue !== ratios.variant) {
+      const state = variantValue === auditedValue ? "still pushes the audited ratio" : "does not become the variant ratio";
+      failures.push(`${where}: ${formatInstruction(a)} -> ${formatInstruction(v)} ${state}`);
+      continue;
+    }
     if (auditedValue === variantValue) {
       if (a.opcode !== v.opcode) {
         failures.push(`${where}: ${formatInstruction(a)} -> ${formatInstruction(v)} changes width without a value change`);
         continue;
       }
-      // A push of a jump destination must follow that destination when it moves.
+      // A push of a jump destination or an immutable start must follow it when it moves.
       if (auditedValue <= BigInt(auditedLayout.length) && jumpdests.has(Number(auditedValue))) {
         const moved = mapPosition(audited, variant, auditedLayout.length, variantLayout.length, Number(auditedValue));
         if (moved !== Number(auditedValue)) {
-          const hex = (n) => `0x${Number(n).toString(16).padStart(4, "0")}`;
-          failures.push(`${where}: jump destination ${hex(auditedValue)} moved to ${moved === null ? "nowhere" : hex(moved)} but the push is unchanged`);
+          failures.push(`${where}: jump destination ${hex4(auditedValue)} moved to ${moved === null ? "nowhere" : hex4(moved)} but the push is unchanged`);
+        }
+      } else if (name === "init" && auditedValue <= BigInt(Number.MAX_SAFE_INTEGER) && immutables.has(Number(auditedValue))) {
+        const pair = immutables.get(Number(auditedValue));
+        if (pair.start !== Number(auditedValue)) {
+          failures.push(`${where}: ${pair.detail} ${hex4(auditedValue)} moved to ${hex4(pair.start)} but the push is unchanged`);
         }
       }
       continue;
     }
 
-    const kind = classify(auditedValue, variantValue, mappers, ratios);
-    if (!kind) {
+    const match = classify(auditedValue, variantValue, rules, ratios);
+    if (!match) {
       failures.push(`${where}: ${formatInstruction(a)} -> ${formatInstruction(v)} is not a ratio, code offset or code length change`);
       continue;
     }
@@ -216,7 +288,8 @@ function compareSection(name, layouts, ratios) {
       variantOffset: v.offset,
       audited: formatInstruction(a),
       variant: formatInstruction(v),
-      kind,
+      kind: match.kind,
+      detail: match.detail,
     });
   }
   return { instructionCount: { audited: audited.length, variant: variant.length }, differences, failures };
@@ -224,26 +297,33 @@ function compareSection(name, layouts, ratios) {
 
 // Compares { initCode, runtime, metadata } of the audited and variant builds. `runtime` excludes
 // the metadata tail; `metadata` is that tail (optional). An empty initCode skips the init section.
-function compareVariant({ audited, variant, auditedRatio, variantRatio }) {
+// `immutableReferences` ({ audited, variant }, solc format) enables immutable starts as init code
+// offsets. `expectedRatioSites` ({ runtime, init }) fixes the number of ratio sites per section.
+function compareVariant({ audited, variant, auditedRatio, variantRatio, immutableReferences, expectedRatioSites }) {
   const layouts = {
     audited: { init: buildLayout(audited.initCode || ""), runtime: buildLayout(audited.runtime, audited.metadata) },
     variant: { init: buildLayout(variant.initCode || ""), runtime: buildLayout(variant.runtime, variant.metadata) },
   };
   const ratios = { audited: BigInt(auditedRatio), variant: BigInt(variantRatio) };
-  const sections = { runtime: compareSection("runtime", layouts, ratios) };
+  const immutables = pairImmutables(immutableReferences, layouts);
+  const sections = { runtime: compareSection("runtime", layouts, ratios, immutables.pairs) };
   if (layouts.audited.init.length > 0 || layouts.variant.init.length > 0) {
-    sections.init = compareSection("init", layouts, ratios);
+    sections.init = compareSection("init", layouts, ratios, immutables.pairs);
   }
 
   const counts = Object.fromEntries(KINDS.map((kind) => [kind, 0]));
-  const failures = [];
-  for (const result of Object.values(sections)) {
+  const failures = [...immutables.failures];
+  for (const [name, result] of Object.entries(sections)) {
     result.counts = Object.fromEntries(KINDS.map((kind) => [kind, 0]));
     for (const difference of result.differences) {
       result.counts[difference.kind] += 1;
       counts[difference.kind] += 1;
     }
     failures.push(...result.failures);
+    const expected = expectedRatioSites && expectedRatioSites[name];
+    if (expected !== undefined && result.counts.ratio !== expected) {
+      failures.push(`${name}: ${result.counts.ratio} ratio sites, expected ${expected}`);
+    }
   }
   return { ok: failures.length === 0, auditedRatio: Number(auditedRatio), variantRatio: Number(variantRatio), sections, counts, failures };
 }
@@ -262,10 +342,24 @@ function zeroRanges(body, immutableReferences) {
 // Compares a compiled runtime with deployed runtime bytes: immutable ranges are zeroed in both
 // and the metadata tails are removed before requiring byte equality.
 function compareRuntimeWithOnchain({ compiled, onchain, immutableReferences }) {
-  const compiledCode = zeroRanges(stripMetadata(compiled).code, immutableReferences);
-  const onchainCode = zeroRanges(stripMetadata(onchain).code, immutableReferences);
-  if (compiledCode.length !== onchainCode.length) {
-    return { ok: false, message: `Runtime length differs (${compiledCode.length} vs ${onchainCode.length})` };
+  let compiledBody;
+  let onchainBody;
+  try {
+    compiledBody = stripMetadata(compiled).code;
+    onchainBody = stripMetadata(onchain).code;
+  } catch (error) {
+    return { ok: false, message: error.message };
+  }
+  if (compiledBody.length !== onchainBody.length) {
+    return { ok: false, message: `Runtime length differs (${compiledBody.length / 2} vs ${onchainBody.length / 2})` };
+  }
+  let compiledCode;
+  let onchainCode;
+  try {
+    compiledCode = zeroRanges(compiledBody, immutableReferences);
+    onchainCode = zeroRanges(onchainBody, immutableReferences);
+  } catch (error) {
+    return { ok: false, message: error.message };
   }
   for (let i = 0; i < compiledCode.length; i += 1) {
     if (compiledCode[i] !== onchainCode[i]) {

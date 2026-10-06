@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { disassemble } = require("../../scripts/lib/bytecode-diff");
-const { loadBuild, proveVariant, settingsFailures, VARIANTS, AUDITED } = require("../../scripts/prove-ratio-variants");
+const { loadBuild, proveVariant, settingsFailures, VARIANTS, AUDITED, EXPECTED_RATIO_SITES } = require("../../scripts/prove-ratio-variants");
 
 const AUDITED_ARTIFACT = path.join(__dirname, "..", "..", "artifacts", "contracts", "TokenSwap.sol", "TokenSwap.json");
 const pushValue = (formatted) => parseInt(formatted.split(" 0x")[1], 16);
@@ -44,6 +44,7 @@ describe("TokenSwap ratio variant bytecode proof", function () {
       });
 
       it("changes the ratio at exactly two runtime sites", function () {
+        assert.deepStrictEqual(EXPECTED_RATIO_SITES, { runtime: 2, init: 0 });
         assert.strictEqual(result.sections.runtime.counts.ratio, 2);
         assert.strictEqual(result.sections.init.counts.ratio, 0);
         const ratioSites = result.sections.runtime.differences.filter((d) => d.kind === "ratio");
@@ -67,10 +68,12 @@ describe("TokenSwap ratio variant bytecode proof", function () {
           const offsets = result.sections.runtime.differences.filter((d) => d.kind === "code-offset");
           assert.ok(offsets.length > 0);
           assert.deepStrictEqual(offsets.map((d) => d.index), movedTargets.map((i) => i.index));
+          assert.ok(offsets.every((d) => d.detail === "runtime JUMPDEST"));
         });
 
         it("moves the init code immutable positions to the variant's immutable references", function () {
           const moved = result.sections.init.differences.filter((d) => d.kind === "code-offset");
+          assert.ok(moved.every((d) => /^immutable \d+\[\d+\] start$/.test(d.detail)));
           const pairs = moved.map((d) => [pushValue(d.audited), pushValue(d.variant)]);
           const auditedStarts = immutableStarts(audited);
           const variantStarts = immutableStarts(variant);
@@ -86,6 +89,10 @@ describe("TokenSwap ratio variant bytecode proof", function () {
           assert.strictEqual(shrink, 2);
           assert.ok(lengths.length > 0);
           for (const d of lengths) assert.strictEqual(pushValue(d.audited) - pushValue(d.variant), shrink);
+          assert.deepStrictEqual(
+            [...new Set(lengths.map((d) => d.detail))].sort(),
+            ["creation length", "full runtime length"]
+          );
         });
       }
     });
