@@ -1,12 +1,22 @@
 const polygon = require("./polygon.json");
 const mainnet = require("./mainnet.json");
+const local = require("./local.json");
 
-const configs = { "137": polygon, "1": mainnet, "31337": polygon };
+const LOCAL_CHAIN_ID = "31337";
 
-const getConfig = (network)=>{
-    return configs[network];
+const configs = { "137": polygon, "1": mainnet, [LOCAL_CHAIN_ID]: local };
+
+const getConfig = (chainId) => {
+    const config = configs[String(chainId)];
+    if (!config) {
+        throw new Error(`No deploy config for chain ${chainId}`);
+    }
+    return { ...config };
 }
 
+const isLocalChain = (chainId) => String(chainId) === LOCAL_CHAIN_ID;
+
 module.exports = {
-    getConfig
+    getConfig,
+    isLocalChain
 }
