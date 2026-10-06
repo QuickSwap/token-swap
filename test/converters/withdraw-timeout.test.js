@@ -207,6 +207,7 @@ describe("deriveWithdrawDuration", function () {
   it("refuses an invalid observed block time when given", function () {
     assert.throws(() => deriveWithdrawDuration(withInput({ observedBlockTimeMs: "2000" })), /observedBlockTimeMs/);
     assert.throws(() => deriveWithdrawDuration(withInput({ observedBlockTimeMs: -5 })), /observedBlockTimeMs/);
+    assert.throws(() => deriveWithdrawDuration(withInput({ observedBlockTimeMs: 0 })), /observedBlockTimeMs/);
   });
 
   it("refuses being called without an argument", function () {

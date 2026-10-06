@@ -91,6 +91,7 @@ function deriveWithdrawDuration(input = {}) {
 
   if (input.observedBlockTimeMs !== undefined) {
     const observed = requireCount(input.observedBlockTimeMs, "observedBlockTimeMs");
+    requireMinimum(observed, 1, "observedBlockTimeMs");
     const required = ceilDiv(observed * HEADROOM_NUMERATOR, HEADROOM_DENOMINATOR);
     if (blockTimeMs < required) {
       throw new Error(
