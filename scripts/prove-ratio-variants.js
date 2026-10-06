@@ -2,8 +2,10 @@
 // TokenSwap build only in the SWAP_RATIO constant and the code offsets and lengths that move with it.
 //
 // Usage (after `npx hardhat compile`):
-//   node scripts/prove-ratio-variants.js [--onchain <rpcUrl>] [--json <file>]
+//   node scripts/prove-ratio-variants.js [--onchain <rpcUrl>] [--forge-out <dir>] [--json <file>]
 //
+// --forge-out compares each Foundry artifact (after `forge build`) with the Hardhat artifact, init code and
+// runtime, after stripping metadata.
 // --onchain compares the audited runtime with the deployed Polygon converter through eth_getCode.
 // Without it the script does not access the network.
 const fs = require("fs");
@@ -113,6 +115,21 @@ function proveVariant(audited, variant, ratio) {
   return { source: variant.source, ratio, ...report, ok: failures.length === 0, failures };
 }
 
+// Compares the Foundry artifact of a build with its Hardhat artifact, init code and runtime without metadata.
+function compareForge(build, forgeOut) {
+  const file = path.join(forgeOut, path.relative("contracts", build.source), "TokenSwap.json");
+  if (!fs.existsSync(file)) return { source: build.source, ok: false, message: `missing ${file}` };
+  const forge = readJson(file);
+  let sections;
+  try {
+    sections = splitCreationCode({ bytecode: forge.bytecode.object, deployedBytecode: forge.deployedBytecode.object });
+  } catch (error) {
+    return { source: build.source, ok: false, message: error.message };
+  }
+  const differing = ["initCode", "runtime"].filter((name) => sections[name] !== build.sections[name]);
+  return { source: build.source, ok: differing.length === 0, message: differing.length ? `${differing.join(", ")} differ` : "" };
+}
+
 function rpcCall(url, method, params) {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
   const client = url.startsWith("https:") ? https : http;
@@ -164,7 +181,7 @@ function parseArgs(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
-    if (flag === "--onchain" || flag === "--json") {
+    if (flag === "--onchain" || flag === "--json" || flag === "--forge-out") {
       const value = argv[i + 1];
       if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
       options[flag.slice(2)] = value;
@@ -197,10 +214,19 @@ async function main() {
   const report = { audited: AUDITED.source, auditedFailures: settingsFailures(audited), variants: [] };
   for (const failure of report.auditedFailures) console.log(`FAIL ${failure}`);
 
+  const builds = [audited];
   for (const { source, ratio } of VARIANTS) {
-    const result = proveVariant(audited, loadBuild(source), ratio);
+    const variant = loadBuild(source);
+    builds.push(variant);
+    const result = proveVariant(audited, variant, ratio);
     report.variants.push(result);
     printReport(result);
+  }
+
+  if (options["forge-out"]) {
+    report.forge = builds.map((build) => compareForge(build, options["forge-out"]));
+    console.log("");
+    for (const { source, ok, message } of report.forge) console.log(`forge ${source}: ${ok ? "OK" : `FAILED (${message})`}`);
   }
 
   if (options.onchain) {
@@ -209,7 +235,8 @@ async function main() {
     console.log(`\nonchain ${ONCHAIN_ADDRESS}: ${ok ? `OK (${length} bytes match)` : `FAILED (${message})`}`);
   }
 
-  report.ok = report.auditedFailures.length === 0 && report.variants.every((v) => v.ok) && (!report.onchain || report.onchain.ok);
+  report.ok = report.auditedFailures.length === 0 && report.variants.every((v) => v.ok) && (!report.onchain || report.onchain.ok) &&
+    (!report.forge || report.forge.every((f) => f.ok));
   if (options.json) fs.writeFileSync(options.json, JSON.stringify(report, null, 2) + "\n");
   console.log(`\nresult: ${report.ok ? "OK" : "FAILED"}`);
   return report.ok;
@@ -225,4 +252,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { loadBuild, proveVariant, settingsFailures, VARIANTS, AUDITED, EXPECTED_RATIO_SITES };
+module.exports = { loadBuild, proveVariant, compareForge, settingsFailures, VARIANTS, AUDITED, EXPECTED_RATIO_SITES };

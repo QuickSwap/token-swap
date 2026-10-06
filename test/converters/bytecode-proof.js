@@ -5,8 +5,9 @@ const fs = require("fs");
 const path = require("path");
 
 const { disassemble } = require("../../scripts/lib/bytecode-diff");
-const { loadBuild, proveVariant, settingsFailures, VARIANTS, AUDITED, EXPECTED_RATIO_SITES } = require("../../scripts/prove-ratio-variants");
+const { loadBuild, proveVariant, compareForge, settingsFailures, VARIANTS, AUDITED, EXPECTED_RATIO_SITES } = require("../../scripts/prove-ratio-variants");
 
+const FORGE_OUT = path.join(__dirname, "..", "..", "cache", "forge-out");
 const AUDITED_ARTIFACT = path.join(__dirname, "..", "..", "artifacts", "contracts", "TokenSwap.sol", "TokenSwap.json");
 const pushValue = (formatted) => parseInt(formatted.split(" 0x")[1], 16);
 const immutableStarts = (build) =>
@@ -26,6 +27,17 @@ describe("TokenSwap ratio variant bytecode proof", function () {
   it("audited build uses the audited compiler profile", function () {
     assert.deepStrictEqual(settingsFailures(audited), []);
   });
+
+  for (const { source } of [AUDITED, ...VARIANTS]) {
+    it(`Foundry build of ${source} matches the Hardhat build without metadata`, function () {
+      if (!fs.existsSync(FORGE_OUT)) {
+        console.log("    Skipping Foundry comparison: cache/forge-out is missing, run `forge build` first.");
+        this.skip();
+      }
+      const result = compareForge(loadBuild(source), FORGE_OUT);
+      assert.strictEqual(result.ok, true, result.message);
+    });
+  }
 
   for (const { source, ratio } of VARIANTS) {
     describe(`ratio-${ratio}`, function () {
