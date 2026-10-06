@@ -1,0 +1,16 @@
+# Foundry profile for building and deploying the TokenSwap ratio variants.
+# Mirrors the audited build: solc 0.8.12, optimizer 1,000,000 runs, evmVersion london,
+# metadata bytecodeHash ipfs, OpenZeppelin Contracts 4.5.0 from node_modules.
+[profile.default]
+src = "contracts"
+libs = ["node_modules"]
+out = "cache/forge-out"
+cache_path = "cache/forge-cache"
+remappings = ["@openzeppelin/=node_modules/@openzeppelin/"]
+optimizer = true
+optimizer_runs = 1000000
+evm_version = "london"
+bytecode_hash = "ipfs"
+use_literal_content = true
+skip = ["contracts/QuickEthereum.sol", "contracts/QuickPolygon.sol"]
+auto_detect_remappings = false
