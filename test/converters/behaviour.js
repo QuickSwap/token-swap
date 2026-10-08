@@ -18,7 +18,6 @@ const BUILDS = [
 ];
 
 const DEAD = '0x000000000000000000000000000000000000dEaD';
-const SAFE = '0x636940D73fCed320B558a08348d7e2fa16bc74aa';
 const DURATION = 20;
 // Explicit gas so a failing call is mined in a known block instead of being
 // rejected during gas estimation.
@@ -41,12 +40,13 @@ for (const { fqn, ratio } of BUILDS) {
     let wallet;
     let user;
     let other;
+    let newOwner;
     let TokenSwap;
     let TestToken;
     let CallbackToken;
 
     before(async function () {
-      [wallet, user, other] = await ethers.getSigners();
+      [wallet, user, other, newOwner] = await ethers.getSigners();
       TokenSwap = await ethers.getContractFactory(fqn);
       TestToken = await ethers.getContractFactory('TestToken');
       const { abi, bytecode } = await compileMock('CallbackToken.sol', 'CallbackToken');
@@ -330,20 +330,16 @@ for (const { fqn, ratio } of BUILDS) {
       });
     });
 
-    describe('ownership handoff to the Safe', function () {
-      afterEach(async function () {
-        await ethers.provider.send('hardhat_stopImpersonatingAccount', [SAFE]);
-      });
-
-      it('moves every owner right to the Safe', async function () {
+    describe('ownership handoff to a new owner', function () {
+      it('moves every owner right to the new owner', async function () {
         const funding = expandTo18Decimals(10);
         const { quickX, tokenSwap } = await deploySystem({
           quickSupply: 1, quickXSupply: funding, funding, userQuick: 0,
         });
 
-        await expect(tokenSwap.transferOwnership(SAFE))
-          .to.emit(tokenSwap, 'OwnershipTransferred').withArgs(wallet.address, SAFE);
-        expect(await tokenSwap.owner()).to.eq(SAFE);
+        await expect(tokenSwap.transferOwnership(newOwner.address))
+          .to.emit(tokenSwap, 'OwnershipTransferred').withArgs(wallet.address, newOwner.address);
+        expect(await tokenSwap.owner()).to.eq(newOwner.address);
 
         const next = (await tokenSwap.withdrawTimeout()).add(50);
         await expect(tokenSwap.setWithdrawTimeout(next))
@@ -352,17 +348,13 @@ for (const { fqn, ratio } of BUILDS) {
         await expect(tokenSwap.withdrawTokens(quickX.address, funding))
           .to.be.revertedWith('Ownable: caller is not the owner');
 
-        await ethers.provider.send('hardhat_impersonateAccount', [SAFE]);
-        await ethers.provider.send('hardhat_setBalance', [SAFE, '0x8AC7230489E80000']);
-        const safe = await ethers.getSigner(SAFE);
-
-        await expect(tokenSwap.connect(safe).setWithdrawTimeout(next))
+        await expect(tokenSwap.connect(newOwner).setWithdrawTimeout(next))
           .to.emit(tokenSwap, 'NewWithdrawTimeout').withArgs(next);
         await mineUntil(next.toNumber());
-        await expect(tokenSwap.connect(safe).withdrawTokens(quickX.address, funding))
-          .to.emit(quickX, 'Transfer').withArgs(tokenSwap.address, SAFE, funding)
+        await expect(tokenSwap.connect(newOwner).withdrawTokens(quickX.address, funding))
+          .to.emit(quickX, 'Transfer').withArgs(tokenSwap.address, newOwner.address, funding)
           .to.emit(tokenSwap, 'WithdrawTokens').withArgs(quickX.address, funding);
-        expect(await quickX.balanceOf(SAFE)).to.eq(funding);
+        expect(await quickX.balanceOf(newOwner.address)).to.eq(funding);
         expect(await quickX.balanceOf(tokenSwap.address)).to.eq(0);
       });
     });
