@@ -202,7 +202,20 @@ async function deployTokenSwap(hre) {
   console.log(`TokenSwap at ${result.address} is owned by ${config.OWNER}`);
 }
 
-module.exports = deployTokenSwap;
+// Converter deployments on Polygon use the Foundry commands with foundry.toml.
+async function deployUnlessPolygon(hre) {
+  const chainId = String(await hre.getChainId());
+  if (chainId === "137") {
+    throw new Error(
+      "TokenSwap deployments on chain 137 use the Foundry path (forge create with foundry.toml); " +
+      "this Hardhat deploy script does not run on Polygon"
+    );
+  }
+  return deployTokenSwap(hre);
+}
+
+module.exports = deployUnlessPolygon;
+module.exports.deployTokenSwap = deployTokenSwap;
 module.exports.tags = ["TokenSwap"];
 module.exports.checks = {
   EXPECTED_TARGETS,

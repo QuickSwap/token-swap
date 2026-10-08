@@ -5,9 +5,11 @@ const { describe, it, beforeEach, afterEach } = typeof global.describe === "func
   ? global
   : require("node:test");
 
-const deployTokenSwap = require("../../deploy/001_deploy_swap");
+const deploy = require("../../deploy/001_deploy_swap");
 
-const { EXPECTED_TARGETS } = deployTokenSwap.checks;
+const { deployTokenSwap } = deploy;
+
+const { EXPECTED_TARGETS } = deploy.checks;
 const polygon = EXPECTED_TARGETS["137"];
 const SAFE = polygon.OWNER;
 const DEPLOYER = "0x00000000000000000000000000000000000000d1";
